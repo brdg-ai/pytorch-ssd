@@ -208,6 +208,7 @@ def test(loader, net, criterion, device, writer=None, epoch=0):
             regression_loss, classification_loss = criterion(confidence, locations, labels, boxes)
             loss = regression_loss + classification_loss
             if writer is not None:
+                # TODO:  Move this to log an average instead of every box
                 writer.add_scalar('Test_Loss', loss, epoch)
                 writer.add_scalar('Test_Regression_Loss', regression_loss, epoch)
                 writer.add_scalar('Test_Classification_Loss', classification_loss, epoch)
