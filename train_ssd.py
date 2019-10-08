@@ -197,7 +197,7 @@ def test(loader, net, criterion, device, writer=None, epoch=0):
                 print("Image confidences shape", image_confidences.shape)
                 confident_boxes_mask = image_confidences[:, 1] > 0.2
                 display_boxes = box_utils.convert_locations_to_boxes(
-                    display_locations, config.priors, config.center_variance, config.size_variance
+                    image_locations, config.priors, config.center_variance, config.size_variance
                 )
                 display_boxes = display_boxes[confident_boxes_mask]
                 display_boxes = box_utils.center_form_to_corner_form(display_boxes)
