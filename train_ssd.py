@@ -167,7 +167,7 @@ def train(loader, net, criterion, optimizer, device, debug_steps=100, epoch=-1, 
             running_classification_loss = 0.0
 
 
-def test(loader, net, criterion, device, writer=None):
+def test(loader, net, criterion, device, writer=None, epoch=0):
     net.eval()
     running_loss = 0.0
     running_regression_loss = 0.0
@@ -185,7 +185,6 @@ def test(loader, net, criterion, device, writer=None):
         with torch.no_grad():
             confidence, locations = net(images)
             if writer is not None and num % 47 == 1:
-                print("Images0: ", images[0])
                 normalized_image = ((images[0] + 1.0)/2).to("cpu")
                 image_locations = locations[0].to("cpu")
                 image_confidences = confidence[0].to("cpu")
@@ -198,13 +197,13 @@ def test(loader, net, criterion, device, writer=None):
                 print("Image confidences shape", image_confidences.shape)
                 confident_boxes_mask = image_confidences[:, 1] > 0.2
                 display_boxes = box_utils.convert_locations_to_boxes(
-                    image_locations, config.priors, config.center_variance, config.size_variance
+                    display_locations, config.priors, config.center_variance, config.size_variance
                 )
                 display_boxes = display_boxes[confident_boxes_mask]
                 display_boxes = box_utils.center_form_to_corner_form(display_boxes)
                 permuted_image = normalized_image.permute(1, 2, 0) # CHW to HWC
                 _, boxesAbs, _ = ToAbs(permuted_image, display_boxes)
-                writer.add_image_with_boxes('Test Image', normalized_image, boxesAbs, num)
+                writer.add_image_with_boxes('Test Image', normalized_image, boxesAbs, epoch)
 
             regression_loss, classification_loss = criterion(confidence, locations, labels, boxes)
             loss = regression_loss + classification_loss
@@ -375,7 +374,7 @@ if __name__ == '__main__':
               device=DEVICE, debug_steps=args.debug_steps, epoch=epoch, writer=writer)
         
         if epoch % args.validation_epochs == 0 or epoch == args.num_epochs - 1:
-            val_loss, val_regression_loss, val_classification_loss = test(val_loader, net, criterion, DEVICE, writer=writer)
+            val_loss, val_regression_loss, val_classification_loss = test(val_loader, net, criterion, DEVICE, writer=writer, epoch)
             logging.info(
                 f"Epoch: {epoch}, " +
                 f"Validation Loss: {val_loss:.4f}, " +
