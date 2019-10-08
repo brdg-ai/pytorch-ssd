@@ -374,7 +374,7 @@ if __name__ == '__main__':
               device=DEVICE, debug_steps=args.debug_steps, epoch=epoch, writer=writer)
         
         if epoch % args.validation_epochs == 0 or epoch == args.num_epochs - 1:
-            val_loss, val_regression_loss, val_classification_loss = test(val_loader, net, criterion, DEVICE, writer=writer, epoch)
+            val_loss, val_regression_loss, val_classification_loss = test(val_loader, net, criterion, DEVICE, writer=writer, epoch=epoch)
             logging.info(
                 f"Epoch: {epoch}, " +
                 f"Validation Loss: {val_loss:.4f}, " +
