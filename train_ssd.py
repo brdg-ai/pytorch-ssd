@@ -7,8 +7,11 @@ import itertools
 import torch
 from torch.utils.data import DataLoader, ConcatDataset
 from torch.optim.lr_scheduler import CosineAnnealingLR, MultiStepLR
+from tensorboardX import SummaryWriter
+from vision.transforms.transforms import ToAbsoluteCoords
 
 from vision.utils.misc import str2bool, Timer, freeze_net_layers, store_labels
+from vision.utils import box_utils
 from vision.ssd.ssd import MatchPrior
 from vision.ssd.vgg_ssd import create_vgg_ssd
 from vision.ssd.mobilenetv1_ssd import create_mobilenetv1_ssd
@@ -107,13 +110,30 @@ if args.use_cuda and torch.cuda.is_available():
     logging.info("Use Cuda.")
 
 
-def train(loader, net, criterion, optimizer, device, debug_steps=100, epoch=-1):
+def train(loader, net, criterion, optimizer, device, debug_steps=100, epoch=-1, writer=None, target_transform=None):
     net.train(True)
     running_loss = 0.0
     running_regression_loss = 0.0
     running_classification_loss = 0.0
+    ToAbs = ToAbsoluteCoords()
     for i, data in enumerate(loader):
         images, boxes, labels = data
+        if writer is not None:
+            normalized_image = (images[0] + 1.0)/2
+
+            # Warning:  Hardcoding for mobilenet config for now
+            config = mobilenetv1_ssd_config
+            display_boxes = box_utils.convert_locations_to_boxes(
+                boxes, config.priors, config.center_variance, config.size_variance
+            )
+            display_boxes = box_utils.center_form_to_corner_form(display_boxes)
+#            print("display_boxes_rel: ",display_boxes[0])
+#            print("Display boxes shape:", display_boxes.shape)
+            permuted_image = images[0].permute(1, 2, 0) # CHW to HWC
+#            print("Permuted images shape", permuted_image.shape)
+            _, boxesAbs, _ = ToAbs(permuted_image, display_boxes[0])
+            writer.add_image_with_boxes('Training Image', normalized_image, boxesAbs, i)
+#            print("Boxes0: ", boxesAbs)
         images = images.to(device)
         boxes = boxes.to(device)
         labels = labels.to(device)
@@ -122,6 +142,10 @@ def train(loader, net, criterion, optimizer, device, debug_steps=100, epoch=-1):
         confidence, locations = net(images)
         regression_loss, classification_loss = criterion(confidence, locations, labels, boxes)  # TODO CHANGE BOXES
         loss = regression_loss + classification_loss
+        if writer is not None:
+            writer.add_scalar('Training_Loss', loss, epoch)
+            writer.add_scalar('Training_Regression_Loss', regression_loss, epoch)
+            writer.add_scalar('Training_Classification_Loss', classification_loss, epoch)
         loss.backward()
         optimizer.step()
 
@@ -143,7 +167,7 @@ def train(loader, net, criterion, optimizer, device, debug_steps=100, epoch=-1):
             running_classification_loss = 0.0
 
 
-def test(loader, net, criterion, device):
+def test(loader, net, criterion, device, writer=None):
     net.eval()
     running_loss = 0.0
     running_regression_loss = 0.0
@@ -160,12 +184,16 @@ def test(loader, net, criterion, device):
             confidence, locations = net(images)
             regression_loss, classification_loss = criterion(confidence, locations, labels, boxes)
             loss = regression_loss + classification_loss
+            if writer is not None:
+                writer.add_scalar('Test_Loss', loss, epoch)
+                writer.add_scalar('Test_Regression_Loss', regression_loss, epoch)
+                writer.add_scalar('Test_Classification_Loss', classification_loss, epoch)
+
 
         running_loss += loss.item()
         running_regression_loss += regression_loss.item()
         running_classification_loss += classification_loss.item()
     return running_loss / num, running_regression_loss / num, running_classification_loss / num
-
 
 if __name__ == '__main__':
     timer = Timer()
@@ -193,6 +221,8 @@ if __name__ == '__main__':
     train_transform = TrainAugmentation(config.image_size, config.image_mean, config.image_std)
     target_transform = MatchPrior(config.priors, config.center_variance,
                                   config.size_variance, 0.5)
+    global g_target_transform
+    g_target_transform = target_transform
 
     test_transform = TestTransform(config.image_size, config.image_mean, config.image_std)
 
@@ -312,14 +342,16 @@ if __name__ == '__main__':
         parser.print_help(sys.stderr)
         sys.exit(1)
 
+    logging.info("Initialize summarywriter")
+    writer = SummaryWriter()
     logging.info(f"Start training from epoch {last_epoch + 1}.")
     for epoch in range(last_epoch + 1, args.num_epochs):
         scheduler.step()
         train(train_loader, net, criterion, optimizer,
-              device=DEVICE, debug_steps=args.debug_steps, epoch=epoch)
+              device=DEVICE, debug_steps=args.debug_steps, epoch=epoch, writer=writer)
         
         if epoch % args.validation_epochs == 0 or epoch == args.num_epochs - 1:
-            val_loss, val_regression_loss, val_classification_loss = test(val_loader, net, criterion, DEVICE)
+            val_loss, val_regression_loss, val_classification_loss = test(val_loader, net, criterion, DEVICE, writer=writer)
             logging.info(
                 f"Epoch: {epoch}, " +
                 f"Validation Loss: {val_loss:.4f}, " +
@@ -329,3 +361,5 @@ if __name__ == '__main__':
             model_path = os.path.join(args.checkpoint_folder, f"{args.net}-Epoch-{epoch}-Loss-{val_loss}.pth")
             net.save(model_path)
             logging.info(f"Saved model {model_path}")
+    writer.export_scalars_to_json("./all_scalars.json")
+    writer.close()

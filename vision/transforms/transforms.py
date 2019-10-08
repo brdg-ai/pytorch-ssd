@@ -188,9 +188,12 @@ class RandomContrast(object):
         if random.randint(2):
             alpha = random.uniform(self.lower, self.upper)
             image *= alpha
+            image = np.clip(image, 0, 255)
         return image, boxes, labels
 
-
+# dga:  Initial impl of this was buggy, it takes the image out of [0, 255].
+# Hack fix:  Clamp it.  Note that this will actually change relative fraction
+# of rgb if a color saturates.
 class RandomBrightness(object):
     def __init__(self, delta=32):
         assert delta >= 0.0
@@ -201,6 +204,7 @@ class RandomBrightness(object):
         if random.randint(2):
             delta = random.uniform(-self.delta, self.delta)
             image += delta
+        image = np.clip(image, 0, 255)
         return image, boxes, labels
 
 
@@ -381,6 +385,31 @@ class SwapChannels(object):
         image = image[:, :, self.swaps]
         return image
 
+# The defaults here are excessive.  This is a tuned-down
+# version.
+class LightPhotometricDistort(object):
+    def __init__(self):
+        self.pd = [
+            RandomContrast(0.9, 1.1),  # RGB
+            ConvertColor(current="RGB", transform='HSV'),  # HSV
+            RandomSaturation(0.9, 1.1),  # HSV
+            RandomHue(delta=2),  # HSV
+            ConvertColor(current='HSV', transform='RGB'),  # RGB
+            RandomContrast()  # RGB
+        ]
+        self.rand_brightness = RandomBrightness()
+#        self.rand_light_noise = RandomLightingNoise()
+
+    def __call__(self, image, boxes, labels):
+        im = image.copy()
+        im, boxes, labels = self.rand_brightness(im, boxes, labels)
+        if random.randint(2):
+            distort = Compose(self.pd[:-1])
+        else:
+            distort = Compose(self.pd[1:])
+        return distort(im, boxes, labels)
+#        im, boxes, labels = distort(im, boxes, labels)
+#        return self.rand_light_noise(im, boxes, labels)
 
 class PhotometricDistort(object):
     def __init__(self):
