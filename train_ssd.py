@@ -4,6 +4,8 @@ import logging
 import sys
 import itertools
 
+import numpy as np
+
 import torch
 from torch.utils.data import DataLoader, ConcatDataset
 from torch.optim.lr_scheduler import CosineAnnealingLR, MultiStepLR
@@ -118,22 +120,22 @@ def train(loader, net, criterion, optimizer, device, debug_steps=100, epoch=-1, 
     ToAbs = ToAbsoluteCoords()
     for i, data in enumerate(loader):
         images, boxes, labels = data
-        if writer is not None:
-            normalized_image = (images[0] + 1.0)/2
+#         if writer is not None:
+#             normalized_image = (images[0] + 1.0)/2
 
-            # Warning:  Hardcoding for mobilenet config for now
-            config = mobilenetv1_ssd_config
-            display_boxes = box_utils.convert_locations_to_boxes(
-                boxes, config.priors, config.center_variance, config.size_variance
-            )
-            display_boxes = box_utils.center_form_to_corner_form(display_boxes)
-#            print("display_boxes_rel: ",display_boxes[0])
-#            print("Display boxes shape:", display_boxes.shape)
-            permuted_image = images[0].permute(1, 2, 0) # CHW to HWC
-#            print("Permuted images shape", permuted_image.shape)
-            _, boxesAbs, _ = ToAbs(permuted_image, display_boxes[0])
-            writer.add_image_with_boxes('Training Image', normalized_image, boxesAbs, i)
-#            print("Boxes0: ", boxesAbs)
+#             # Warning:  Hardcoding for mobilenet config for now
+#             config = mobilenetv1_ssd_config
+#             display_boxes = box_utils.convert_locations_to_boxes(
+#                 boxes, config.priors, config.center_variance, config.size_variance
+#             )
+#             display_boxes = box_utils.center_form_to_corner_form(display_boxes)
+# #            print("display_boxes_rel: ",display_boxes[0])
+# #            print("Display boxes shape:", display_boxes.shape)
+#             permuted_image = images[0].permute(1, 2, 0) # CHW to HWC
+# #            print("Permuted images shape", permuted_image.shape)
+#             _, boxesAbs, _ = ToAbs(permuted_image, display_boxes[0])
+#             writer.add_image_with_boxes('Training Image', normalized_image, boxesAbs, i)
+# #            print("Boxes0: ", boxesAbs)
         images = images.to(device)
         boxes = boxes.to(device)
         labels = labels.to(device)
@@ -142,12 +144,46 @@ def train(loader, net, criterion, optimizer, device, debug_steps=100, epoch=-1, 
         confidence, locations = net(images)
         regression_loss, classification_loss = criterion(confidence, locations, labels, boxes)  # TODO CHANGE BOXES
         loss = regression_loss + classification_loss
-        if writer is not None:
-            writer.add_scalar('Training_Loss', loss, epoch)
-            writer.add_scalar('Training_Regression_Loss', regression_loss, epoch)
-            writer.add_scalar('Training_Classification_Loss', classification_loss, epoch)
         loss.backward()
         optimizer.step()
+        if writer is not None:
+            images = images.to("cpu")
+            boxes = boxes.to("cpu")    # This is a batch of boxes
+            labels = labels.to("cpu")
+            locations = locations.to("cpu")
+
+            # Extract the relevant bbox data for images[0], the one we will display in TB:
+            normalized_image = (images[0] + 1.0)/2
+            image_confidence = confidence[0]
+            image_locations = locations[0]
+            image_boxes = boxes[0]  # The boxes just for images[0]
+
+            # Warning:  Hardcoding for mobilenet config for now
+            config = mobilenetv1_ssd_config
+            gt_display_boxes = box_utils.convert_locations_to_boxes(
+                image_boxes, config.priors, config.center_variance, config.size_variance
+            )
+            pred_display_boxes = box_utils.convert_locations_to_boxes(
+                image_locations, config.priors, config.center_variance, config.size_variance
+            )
+            gt_display_boxes = box_utils.center_form_to_corner_form(gt_display_boxes)
+
+            confident_boxes_mask = image_confidence[:, 1] > 0.2
+            pred_display_boxes = box_utils.convert_locations_to_boxes(
+                image_locations, config.priors, config.center_variance, config.size_variance
+            )
+            pred_display_boxes = pred_display_boxes[confident_boxes_mask]
+            pred_display_boxes = box_utils.center_form_to_corner_form(pred_display_boxes)
+
+#            print("display_boxes_rel: ",display_boxes[0])
+#            print("Display boxes shape:", display_boxes.shape)
+            permuted_image = normalized_image.permute(1, 2, 0) # CHW to HWC
+#            print("Permuted images shape", permuted_image.shape)
+            _, gt_boxesAbs, _ = ToAbs(permuted_image, gt_display_boxes)
+            _, pred_boxesAbs, _ = ToAbs(permuted_image, pred_display_boxes)
+            writer.add_image_with_boxes('Training Image', normalized_image, gt_boxesAbs, i)
+            writer.add_image_with_boxes('Predicted Image', normalized_image, pred_boxesAbs, i)
+#            print("Boxes0: ", boxesAbs)
 
         running_loss += loss.item()
         running_regression_loss += regression_loss.item()
@@ -162,6 +198,10 @@ def train(loader, net, criterion, optimizer, device, debug_steps=100, epoch=-1, 
                 f"Average Regression Loss {avg_reg_loss:.4f}, " +
                 f"Average Classification Loss: {avg_clf_loss:.4f}"
             )
+            if writer is not None:
+                writer.add_scalar('Training_Loss', avg_loss, epoch)
+                writer.add_scalar('Training_Regression_Loss', avg_reg_loss, epoch)
+                writer.add_scalar('Training_Classification_Loss', avg_clf_loss, epoch)
             running_loss = 0.0
             running_regression_loss = 0.0
             running_classification_loss = 0.0
