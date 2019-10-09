@@ -390,10 +390,10 @@ class SwapChannels(object):
 class LightPhotometricDistort(object):
     def __init__(self):
         self.pd = [
-            RandomContrast(0.9, 1.1),  # RGB
+            RandomContrast(0.8, 1.1),  # RGB
             ConvertColor(current="RGB", transform='HSV'),  # HSV
-            RandomSaturation(0.9, 1.1),  # HSV
-            RandomHue(delta=2),  # HSV
+            RandomSaturation(0.8, 1.1),  # HSV
+            RandomHue(delta=3),  # HSV
             ConvertColor(current='HSV', transform='RGB'),  # RGB
             RandomContrast()  # RGB
         ]

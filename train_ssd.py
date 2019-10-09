@@ -146,7 +146,7 @@ def train(loader, net, criterion, optimizer, device, debug_steps=100, epoch=-1, 
         loss = regression_loss + classification_loss
         loss.backward()
         optimizer.step()
-        if writer is not None:
+        if writer is not None and i%29 == 0:
             images = images.to("cpu")
             boxes = boxes.to("cpu")    # This is a batch of boxes
             labels = labels.to("cpu")
@@ -181,14 +181,14 @@ def train(loader, net, criterion, optimizer, device, debug_steps=100, epoch=-1, 
 #            print("Permuted images shape", permuted_image.shape)
             _, gt_boxesAbs, _ = ToAbs(permuted_image, gt_display_boxes)
             _, pred_boxesAbs, _ = ToAbs(permuted_image, pred_display_boxes)
-            writer.add_image_with_boxes('Training Image', normalized_image, gt_boxesAbs, i)
-            writer.add_image_with_boxes('Predicted Image', normalized_image, pred_boxesAbs, i)
+            writer.add_image_with_boxes('Training Image', normalized_image, gt_boxesAbs, epoch)
+            writer.add_image_with_boxes('Predicted Image', normalized_image, pred_boxesAbs, epoch)
 #            print("Boxes0: ", boxesAbs)
 
         running_loss += loss.item()
         running_regression_loss += regression_loss.item()
         running_classification_loss += classification_loss.item()
-        if i and i % debug_steps == 0:
+        if i % debug_steps == 0:
             avg_loss = running_loss / debug_steps
             avg_reg_loss = running_regression_loss / debug_steps
             avg_clf_loss = running_classification_loss / debug_steps
@@ -224,7 +224,7 @@ def test(loader, net, criterion, device, writer=None, epoch=0):
 
         with torch.no_grad():
             confidence, locations = net(images)
-            if writer is not None and num % 47 == 1:
+            if writer is not None and num % 2 == 1:
                 normalized_image = ((images[0] + 1.0)/2).to("cpu")
                 image_locations = locations[0].to("cpu")
                 image_confidences = confidence[0].to("cpu")
@@ -234,7 +234,6 @@ def test(loader, net, criterion, device, writer=None, epoch=0):
                 # Filter locations by confidences for class 1
                 # TODO(dga):  This should be more general and should be a function
                 # shared with the live demo at least...
-                print("Image confidences shape", image_confidences.shape)
                 confident_boxes_mask = image_confidences[:, 1] > 0.2
                 display_boxes = box_utils.convert_locations_to_boxes(
                     image_locations, config.priors, config.center_variance, config.size_variance
@@ -410,9 +409,9 @@ if __name__ == '__main__':
     writer = SummaryWriter()
     logging.info(f"Start training from epoch {last_epoch + 1}.")
     for epoch in range(last_epoch + 1, args.num_epochs):
-        scheduler.step()
         train(train_loader, net, criterion, optimizer,
               device=DEVICE, debug_steps=args.debug_steps, epoch=epoch, writer=writer)
+        scheduler.step()
         
         if epoch % args.validation_epochs == 0 or epoch == args.num_epochs - 1:
             val_loss, val_regression_loss, val_classification_loss = test(val_loader, net, criterion, DEVICE, writer=writer, epoch=epoch)
